@@ -158,14 +158,15 @@ function Telemetry.getRssi(tlm)
 end
 
 --- Map range percentage to a warning color.
-function Telemetry.rangeColor(pct)
+--- Falls back to `fallback` (or the theme default) when no warning applies.
+function Telemetry.rangeColor(pct, fallback)
   if pct > 90 then
     return RED
   end
   if pct > 70 then
     return ORANGE
   end
-  return COLOR_THEME_SECONDARY1
+  return fallback or COLOR_THEME_SECONDARY1
 end
 
 --- Range percentage + RSSI text (e.g. "Range 69% -90dBm").

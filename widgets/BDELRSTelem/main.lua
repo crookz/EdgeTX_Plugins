@@ -34,15 +34,16 @@ local function update(widget, options)
 end
 
 return {
-  name = "BD ExpressLRS Telemetry",
+  name = "BDExpressLRS Telemetry",
   create = create,
   refresh = refresh,
   background = background,
   update = update,
   options = {
     { "Transparency", VALUE, 2, 0, 5 },
-    { "TitleColor", COLOR, WHITE },
-    { "SubTextColor", COLOR, GREY },
+    { "TextLevel1Color", COLOR, WHITE },
+    { "TextLevel2Color", COLOR, GREY },
+    { "TextLevel3Color", COLOR, GREY },
   },
   useLvgl = true,
 }

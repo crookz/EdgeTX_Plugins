@@ -37,18 +37,19 @@ local function heroColorMismatch()
   if crsf.modelMismatch then
     return RED
   end
-  return currentOpts.SubTextColor or COLOR_THEME_PRIMARY1
+  return currentOpts.TextLevel2Color or COLOR_THEME_PRIMARY1
 end
 
 local function titleColor()
-  return currentOpts.TitleColor or COLOR_THEME_SECONDARY1
+  return currentOpts.TextLevel1Color or COLOR_THEME_SECONDARY1
+end
+
+local function textLevel3Color()
+  return currentOpts.TextLevel3Color or COLOR_THEME_SECONDARY1
 end
 
 local function detailColor()
-  if not crsf.hasTelemetry then
-    return COLOR_THEME_SECONDARY1
-  end
-  return Telemetry.rangeColor(Telemetry.smoothRng or 0)
+  return Telemetry.rangeColor(Telemetry.smoothRng or 0, currentOpts.TextLevel3Color)
 end
 
 local function heroTextLq()
@@ -113,7 +114,7 @@ function WidgetUI.buildSixth(w, h, opa)
           type = lvgl.LABEL,
           y = lvgl.PAD_SMALL,
           font = SMLSIZE,
-          color = COLOR_THEME_SECONDARY1,
+          color = textLevel3Color,
           text = function()
             local tlm = Telemetry.readLink()
             return Telemetry.getRfModeStr(tlm.rfmd)
@@ -165,7 +166,7 @@ function WidgetUI.buildQuarter(w, h, opa)
           type = lvgl.LABEL,
           align = LEFT,
           font = SMLSIZE,
-          color = COLOR_THEME_SECONDARY1,
+          color = textLevel3Color,
           text = Telemetry.rfDetailText,
         },
       },
@@ -196,7 +197,7 @@ function WidgetUI.buildThird(w, h, opa)
     type = lvgl.LABEL,
     align = LEFT,
     font = SMLSIZE,
-    color = COLOR_THEME_SECONDARY1,
+    color = textLevel3Color,
     text = Telemetry.rfDetailText,
   }
 
@@ -233,14 +234,14 @@ function WidgetUI.buildFull(w, h, opa)
       type = lvgl.LABEL,
       align = LEFT,
       font = SMLSIZE,
-      color = COLOR_THEME_SECONDARY1,
+      color = textLevel3Color,
       text = Telemetry.rfDetailText,
     },
     {
       type = lvgl.LABEL,
       align = LEFT,
       font = SMLSIZE,
-      color = COLOR_THEME_SECONDARY1,
+      color = textLevel3Color,
       text = function()
         local vbat = crsf.getSensorValue("RxBt")
         if vbat == nil or vbat <= 0 then
