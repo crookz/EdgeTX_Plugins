@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------
 -- ELRS Telemetry Widget - Core Logic                                   --
--- Loaded via loadScript() from ELRSTelemetry/main.lua                  --
+-- Loaded via loadScript() from BDELRSTelem/main.lua                    --
 --                                                                      --
 -- Displays ELRS link telemetry using LVGL. Uses the shared CRSF        --
 -- singleton passed from main.lua for device info discovery.             --
@@ -281,7 +281,7 @@ local function bgOpacity(opts)
 end
 
 local screenId = getScreenId()
-local uiPath = table.concat({ "/WIDGETS/ELRSTelemetry/ui/", screenId, ".lua" })
+local uiPath = table.concat({ "/WIDGETS/BDELRSTelem/ui/", screenId, ".lua" })
 local WidgetUI = loadScript(uiPath)({
   crsf = crsf,
   Telemetry = Telemetry,

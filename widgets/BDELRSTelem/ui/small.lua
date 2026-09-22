@@ -31,11 +31,17 @@ WidgetUI.fonts = {
 -- Minimized display helpers
 -- ============================================================================
 
+local currentOpts = {}
+
 local function heroColorMismatch()
   if crsf.modelMismatch then
     return RED
   end
-  return COLOR_THEME_PRIMARY1
+  return currentOpts.SubTextColor or COLOR_THEME_PRIMARY1
+end
+
+local function titleColor()
+  return currentOpts.TitleColor or COLOR_THEME_SECONDARY1
 end
 
 local function detailColor()
@@ -58,7 +64,7 @@ end
 -- Minimized layout builders (by widget height tier)
 -- ============================================================================
 
-local TopBarUI = loadScript("/WIDGETS/ELRSTelemetry/ui/topbar.lua")({
+local TopBarUI = loadScript("/WIDGETS/BDELRSTelem/ui/topbar.lua")({
   crsf = crsf,
   Telemetry = Telemetry,
 })
@@ -204,7 +210,7 @@ function WidgetUI.buildFull(w, h, opa)
       type = lvgl.LABEL,
       align = LEFT,
       font = BOLD,
-      color = COLOR_THEME_SECONDARY1,
+      color = titleColor,
       text = "ExpressLRS",
     },
     {
@@ -255,6 +261,7 @@ end
 --- Route to the appropriate minimized layout based on widget dimensions.
 function WidgetUI.build(wgtZone, opts)
   lvgl.clear()
+  currentOpts = opts or {}
   local w, h = wgtZone.w, wgtZone.h
   local opa = bgOpacity(opts)
   local bp = WidgetUI.breakpoints

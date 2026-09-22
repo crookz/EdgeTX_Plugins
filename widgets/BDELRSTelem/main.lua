@@ -7,7 +7,7 @@
 -- Requires /SCRIPTS/ELRSLib on the SD card for shared CRSF protocol.   --
 ---------------------------------------------------------------------------
 
-local name = "ELRSTelemetry"
+local name = "BDELRSTelem"
 
 -- selene: allow(undefined_variable)
 local function create(zone, options)
@@ -34,13 +34,15 @@ local function update(widget, options)
 end
 
 return {
-  name = "ExpressLRS Telemetry",
+  name = "BD ExpressLRS Telemetry",
   create = create,
   refresh = refresh,
   background = background,
   update = update,
   options = {
     { "Transparency", VALUE, 2, 0, 5 },
+    { "TitleColor", COLOR, WHITE },
+    { "SubTextColor", COLOR, GREY },
   },
   useLvgl = true,
 }
