@@ -51,6 +51,39 @@ local function hasLabel()
   return widget.options.Label ~= ""
 end
 
+local MAX_BOXES = 8
+local RAW_MIN = -1024
+local RAW_MAX = 1024
+local RAW_RANGE = RAW_MAX - RAW_MIN
+
+local function getNumBoxes()
+  local n = widget.options.Boxes or 3
+  if n < 1 then
+    n = 1
+  elseif n > MAX_BOXES then
+    n = MAX_BOXES
+  end
+  return math.floor(n)
+end
+
+local function getBoxLabel(index)
+  return widget.options["Box" .. index] or ""
+end
+
+--- Map a raw value (RAW_MIN..RAW_MAX) to a 1-based box index by dividing
+--- the range into `count` equal segments, the same way the original
+--- fixed 3-box (Up/Mid/Down) layout split it into thirds.
+local function valueToBoxIndex(value, count)
+  local segment = RAW_RANGE / count
+  local idx = math.floor((value - RAW_MIN) / segment)
+  if idx < 0 then
+    idx = 0
+  elseif idx > count - 1 then
+    idx = count - 1
+  end
+  return idx + 1
+end
+
 function widget.create(zone, options)
   widget = { zone=zone, options=options, ts = MIDSIZE, yo = 0, ls = SMLSIZE + SHADOWED + CENTER, lyo = 0, lyo2 = 0 }
    
@@ -93,18 +126,16 @@ function gui.fullScreenRefresh()
   if(value == nil) then
     lcd.drawText(xo, yo, "NO VALUE", XXLSIZE + SHADOWED + CENTER + COLOR_THEME_ACTIVE + BLINK + INVERS)
   else
-    if(value == -1024) then
-      lcd.drawText(xo, yo-60, widget.options.SwUp, XXLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_ACTIVE)
-      lcd.drawText(xo, yo, widget.options.SwMid, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-      lcd.drawText(xo, yo+60, widget.options.SwDown, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-    elseif(value == 0) then
-      lcd.drawText(xo, yo-60, widget.options.SwUp, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-      lcd.drawText(xo, yo, widget.options.SwMid, XXLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_ACTIVE)
-      lcd.drawText(xo, yo+60, widget.options.SwDown, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-    elseif(value == 1024) then
-      lcd.drawText(xo, yo-60, widget.options.SwUp, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-      lcd.drawText(xo, yo, widget.options.SwMid, DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
-      lcd.drawText(xo, yo+60, widget.options.SwDown, XXLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_ACTIVE)
+    local count = getNumBoxes()
+    local active = valueToBoxIndex(value, count)
+    local spacing = 60
+    for i = 1, count do
+      local itemY = yo + (i - 1 - (count - 1) / 2) * spacing
+      if i == active then
+        lcd.drawText(xo, itemY, getBoxLabel(i), XXLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_ACTIVE)
+      else
+        lcd.drawText(xo, itemY, getBoxLabel(i), DBLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_PRIMARY3)
+      end
     end
   end
 end
@@ -123,18 +154,9 @@ function libGUI.widgetRefresh()
   if(value == nil) then
     lcd.drawText(xo, yo, "NO VALUE", widget.ts + BLINK + INVERS)
   else
-
-    local textValue = "INVALID VALUE"
-
-    if(value == -1024) then
-        textValue = widget.options.SwUp
-    elseif(value == 0) then
-        textValue = widget.options.SwMid
-    elseif(value == 1024) then
-        textValue = widget.options.SwDown
-    end
-
-    lcd.drawText(xo, yo, textValue, widget.ts)
+    local count = getNumBoxes()
+    local active = valueToBoxIndex(value, count)
+    lcd.drawText(xo, yo, getBoxLabel(active), widget.ts)
   end
 
   if (hasLabel) then
