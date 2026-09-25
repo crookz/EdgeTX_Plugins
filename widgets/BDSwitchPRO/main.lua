@@ -47,15 +47,9 @@ end
 local options = {
   { "Source", SOURCE, 1 },
   { "Label", STRING , "" },
-  { "Boxes", VALUE, 3, 2, 8 },
-  { "Box1", STRING , "Up" },
-  { "Box2", STRING , "Medium" },
-  { "Box3", STRING , "Down" },
-  { "Box4", STRING , "4" },
-  { "Box5", STRING , "5" },
-  { "Box6", STRING , "6" },
-  { "Box7", STRING , "7" },
-  { "Box8", STRING , "8" },
+  { "SwUp", STRING , "Up" },
+  { "SwMid", STRING , "Medium" },
+	{ "SwDown", STRING , "Down" },
 }
 
 local function update(widget, options)
