@@ -50,7 +50,18 @@ local options = {
   { "SwUp", STRING , "Up" },
   { "SwMid", STRING , "Medium" },
 	{ "SwDown", STRING , "Down" },
+  { "Percent", BOOL, 0 },
+  { "PctLow", VALUE, 0, 0, 100 },
+  { "PctHigh", VALUE, 100, 0, 100 },
+  { "LockSrc", SOURCE, 0 },
 }
+
+-- drop-down on EdgeTX 2.11+, otherwise a U/M/D text field
+if CHOICE then
+  options[#options + 1] = { "ActivePos", CHOICE, 1, { "Off", "Up", "Mid", "Down", "Up+Mid", "Mid+Down", "Up+Down" } }
+else
+  options[#options + 1] = { "ActivePos", STRING, "" }
+end
 
 local function update(widget, options)
 	widget.update(options)

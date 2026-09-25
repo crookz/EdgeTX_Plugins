@@ -51,6 +51,95 @@ local function hasLabel()
   return widget.options.Label ~= ""
 end
 
+local function isPercent()
+  return widget.options.Percent == 1
+end
+
+-- maps the source range -1024..1024 linearly onto PctLow..PctHigh
+local function percentValue(value)
+  if value < -1024 then value = -1024 elseif value > 1024 then value = 1024 end
+  local low = widget.options.PctLow
+  local high = widget.options.PctHigh
+  return math.floor(low + (value + 1024) * (high - low) / 2048 + 0.5)
+end
+
+-- ActivePos drop-down entries (1-based) as position letters
+local ACTIVE_CHOICES = { "", "U", "M", "D", "UM", "MD", "UD" }
+
+-- ActivePos lists the lock switch positions where the slider is active: U, M and/or D.
+-- every other position counts as locked. returns nil when no lock is set up
+local function lockState()
+  local pos = widget.options.ActivePos
+  if type(pos) == "number" then
+    pos = ACTIVE_CHOICES[pos]
+  end
+  if widget.options.LockSrc == 0 or pos == nil or pos == "" then
+    return nil
+  end
+  local v = getValue(widget.options.LockSrc)
+  if v == nil then
+    return nil
+  end
+  local p = "M"
+  if v < -512 then p = "U" elseif v > 512 then p = "D" end
+  if string.find(string.upper(pos), p, 1, true) then
+    return "active"
+  end
+  return "locked"
+end
+
+-- small padlock, s is the total height in pixels
+local function drawLock(x, y, s, color)
+  local bh = math.floor(s * 0.6)
+  local sh = s - bh
+  local bw = math.floor(s * 0.8)
+  local sw = math.floor(bw * 0.6)
+  local t = math.max(1, math.floor(s / 8))
+  lcd.drawRectangle(x + math.floor((bw - sw) / 2), y, sw, sh + t, color, t)
+  lcd.drawFilledRectangle(x, y + sh, bw, bh, color)
+end
+
+-- small tick, same footprint as the padlock
+local function drawTick(x, y, s, color)
+  local w = math.floor(s * 0.8)
+  local t = math.max(1, math.floor(s / 8))
+  for i = 0, t - 1 do
+    lcd.drawLine(x, y + math.floor(s * 0.55) + i, x + math.floor(w * 0.35), y + s - 1 + i - t, SOLID, color)
+    lcd.drawLine(x + math.floor(w * 0.35), y + s - 1 + i - t, x + w, y + math.floor(s * 0.15) + i, SOLID, color)
+  end
+end
+
+-- plain name of the lock switch (e.g. SB, L01), without the symbol EdgeTX prefixes
+local function lockSourceName()
+  local src = widget.options.LockSrc
+  local name
+  if getSourceName then
+    name = getSourceName(src)
+  else
+    local info = getFieldInfo(src)
+    name = info and info.name
+  end
+  name = string.gsub(name or "", "[^\33-\126]", "")
+  return name
+end
+
+-- draws a padlock (locked) or tick (active) and the lock switch name just right of left aligned text at (x, top)
+local function drawLockStatus(state, text, flags, x, top, color)
+  local w, h = lcd.sizeText(text, flags)
+  local s = math.max(8, math.floor(h / 2))
+  local lx = x + w + 4
+  local ly = top + math.floor((h - s) / 2)
+  if state == "locked" then
+    drawLock(lx, ly, s, color)
+  else
+    drawTick(lx, ly, s, color)
+  end
+
+  local nameFont = SMLSIZE
+  if s >= 20 then nameFont = MIDSIZE end
+  lcd.drawText(lx + math.floor(s * 0.8) + 3, ly + math.floor(s / 2), lockSourceName(), nameFont + VCENTER + SHADOWED + color)
+end
+
 function widget.create(zone, options)
   widget = { zone=zone, options=options, ts = MIDSIZE, yo = 0, ls = SMLSIZE + SHADOWED + CENTER, lyo = 0, lyo2 = 0 }
    
@@ -92,6 +181,24 @@ function gui.fullScreenRefresh()
 
   if(value == nil) then
     lcd.drawText(xo, yo, "NO VALUE", XXLSIZE + SHADOWED + CENTER + COLOR_THEME_ACTIVE + BLINK + INVERS)
+  elseif isPercent() then
+    local text = percentValue(value) .. "%"
+    local flags = XXLSIZE + SHADOWED + VCENTER + COLOR_THEME_ACTIVE
+    local tx = COL1 * 4
+    lcd.drawText(tx, yo - 20, text, flags)
+    local state = lockState()
+    if state then
+      local _, h = lcd.sizeText(text, flags)
+      drawLockStatus(state, text, flags, tx, yo - 20 - math.floor(h / 2), COLOR_THEME_ACTIVE)
+    end
+
+    -- bar showing the raw position of the source
+    local bw = LCD_W - 2 * COL1 * 4
+    local bx = xo - bw / 2
+    local by = yo + 40
+    local fill = math.floor(bw * (math.max(-1024, math.min(1024, value)) + 1024) / 2048)
+    lcd.drawRectangle(bx, by, bw, 16, COLOR_THEME_PRIMARY3)
+    lcd.drawFilledRectangle(bx, by, fill, 16, COLOR_THEME_ACTIVE)
   else
     if(value == -1024) then
       lcd.drawText(xo, yo-60, widget.options.SwUp, XXLSIZE + SHADOWED + CENTER + VCENTER + COLOR_THEME_ACTIVE)
@@ -126,7 +233,9 @@ function libGUI.widgetRefresh()
 
     local textValue = "INVALID VALUE"
 
-    if(value == -1024) then
+    if isPercent() then
+        textValue = percentValue(value) .. "%"
+    elseif(value == -1024) then
         textValue = widget.options.SwUp
     elseif(value == 0) then
         textValue = widget.options.SwMid
@@ -134,7 +243,17 @@ function libGUI.widgetRefresh()
         textValue = widget.options.SwDown
     end
 
-    lcd.drawText(xo, yo, textValue, widget.ts)
+    if isPercent() then
+      local flags = widget.ts - CENTER
+      local tx = widget.zone.x + 4
+      lcd.drawText(tx, yo, textValue, flags)
+      local state = lockState()
+      if state then
+        drawLockStatus(state, textValue, flags, tx, yo, COLOR_THEME_ACTIVE)
+      end
+    else
+      lcd.drawText(xo, yo, textValue, widget.ts)
+    end
   end
 
   if (hasLabel) then
