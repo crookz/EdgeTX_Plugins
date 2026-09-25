@@ -4,5 +4,14 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"VsCodeTaskButtons.showCounter": false,
+		"VsCodeTaskButtons.tasks": [
+			{
+				"label": "$(save) TX Deploy",
+				"task": "Deploy widget to radio",
+				"tooltip": "Copy the open file's widget to the radio SD card"
+			}
+		]
+	}
 }
