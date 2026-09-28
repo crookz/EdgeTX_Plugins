@@ -7,24 +7,32 @@ local name = "BDCellBatt"
 local options = {
   { "Source", SOURCE, 0 },            -- pack voltage sensor (RxBt). Blank = auto-find RxBt
   { "Cells",  VALUE, 0, 0, 12 },      -- 0 = auto-detect on connect
-  { "Full",   VALUE, 420, 400, 440 }, -- per-cell full, x0.01V (420 LiPo, 435 LiHV)
+  { "LiHV",   BOOL, 0 },              -- off = LiPo (4.20V full), on = LiHV (4.35V full)
   { "Warn",   VALUE, 350, 300, 400 }, -- per-cell yellow, x0.01V
   { "Crit",   VALUE, 330, 270, 380 }, -- per-cell red / empty, x0.01V
   { "Color",  COLOR, WHITE },         -- normal text colour
+  { "Alerts", BOOL, 1 },              -- voice alerts at Warn / Crit
 }
 
 local FONTS = { XXLSIZE, DBLSIZE, MIDSIZE, 0, SMLSIZE }
 local C_WARN = lcd.RGB(255, 190, 0)
 local C_CRIT = lcd.RGB(255, 60, 60)
 local PAD = 3
+local ALERT_DELAY = 200   -- must stay below a threshold 2s before alerting (10ms ticks)
+local CRIT_REPEAT = 1000  -- repeat the critical alert every 10s
 
 local function create(zone, opts)
-  return { zone = zone, options = opts, cells = 0 }
+  return { zone = zone, options = opts, cells = 0, alerted = 0, pend = 0, since = 0, nextAlert = 0 }
+end
+
+local function resetAlerts(w)
+  w.alerted, w.pend, w.since = 0, 0, getTime()
 end
 
 local function update(w, opts)
   w.options = opts
   w.cells = 0
+  resetAlerts(w)
 end
 
 local function sourceId(w)
@@ -64,24 +72,57 @@ local function sample(w)
   if live and v > 0.5 then
     local n = o.Cells
     if n == 0 then
-      if w.cells == 0 then w.cells = math.ceil(v / 4.35) end
+      -- max per-cell voltage for detection, with a little headroom over full.
+      -- Also re-detect upwards if the count is impossible for the voltage: telemetry
+      -- can report a low value for a moment at link-up, which would lock in too few cells.
+      local vmax = o.LiHV == 1 and 4.40 or 4.25
+      if w.cells == 0 or v / w.cells > vmax then w.cells = math.ceil(v / vmax) end
       n = w.cells
     end
     w.n, w.packV, w.cellV = n, v, v / n
   elseif not live then
     w.cells = 0 -- re-detect cell count after a pack swap
+    resetAlerts(w)
   end
   w.live = live
 end
 
+-- Voice alerts: once when dropping to Warn, repeating while at Crit.
+-- Level only escalates until the link drops, so load sag recovery doesn't re-trigger.
+local function alerts(w)
+  local o, cv = w.options, w.cellV
+  if o.Alerts ~= 1 or not w.live or not cv then return end
+  local lvl = 0
+  if cv <= o.Crit / 100 then lvl = 2 elseif cv <= o.Warn / 100 then lvl = 1 end
+
+  local now = getTime()
+  if lvl ~= w.pend then w.pend, w.since = lvl, now end
+  if lvl == 0 or now - w.since < ALERT_DELAY then return end
+
+  if lvl > w.alerted or (lvl == 2 and now >= w.nextAlert) then
+    if lvl == 2 then
+      playFile("clobat.wav")
+      playHaptic(15, 0)
+      w.nextAlert = now + CRIT_REPEAT
+    else
+      playFile("lowbat.wav")
+    end
+    playNumber(math.floor(cv * 100 + 0.5), UNIT_VOLTS, PREC2)
+    w.alerted = math.max(w.alerted, lvl)
+  end
+end
+
 local function background(w)
   sample(w)
+  alerts(w)
 end
 
 local function refresh(w, event, touchState)
   sample(w)
+  alerts(w)
   local z, o = w.zone, w.options
-  local full, warn, crit = o.Full / 100, o.Warn / 100, o.Crit / 100
+  local full = o.LiHV == 1 and 4.35 or 4.20
+  local warn, crit = o.Warn / 100, o.Crit / 100
 
   -- colour: normal / warn / crit, grey when link is down (last value kept)
   local col = o.Color
