@@ -8,8 +8,8 @@ local options = {
   { "Source", SOURCE, 0 },            -- pack voltage sensor (RxBt). Blank = auto-find RxBt
   { "Cells",  VALUE, 0, 0, 12 },      -- 0 = auto-detect on connect
   { "LiHV",   BOOL, 0 },              -- off = LiPo (4.20V full), on = LiHV (4.35V full)
-  { "Warn",   VALUE, 350, 300, 400 }, -- per-cell yellow, x0.01V
-  { "Crit",   VALUE, 330, 270, 380 }, -- per-cell red / empty, x0.01V
+  { "Warn",   VALUE, 0, 0, 400 },     -- per-cell yellow, x0.01V. 0 = use BDConfig
+  { "Crit",   VALUE, 0, 0, 380 },     -- per-cell red / empty, x0.01V. 0 = use BDConfig
   { "Color",  COLOR, WHITE },         -- normal text colour
   { "Alerts", BOOL, 1 },              -- voice alerts at Warn / Crit
 }
@@ -20,18 +20,34 @@ local C_CRIT = lcd.RGB(255, 60, 60)
 local PAD = 3
 local ALERT_DELAY = 200   -- must stay below a threshold 2s before alerting (10ms ticks)
 local CRIT_REPEAT = 1000  -- repeat the critical alert every 10s
+local CONFIG = "/WIDGETS/BDCellBatt/BDConfig.lua"
+local DEF_WARN, DEF_CRIT = 3.50, 3.30
 
-local function create(zone, opts)
-  return { zone = zone, options = opts, cells = 0, alerted = 0, pend = 0, since = 0, nextAlert = 0 }
+-- Thresholds in volts per cell: a non-zero widget option wins, else BDConfig, else defaults.
+-- BDConfig is shared by all models; it is read when a model loads or its options change.
+local function loadThresholds(w)
+  local chunk = loadScript(CONFIG)
+  local cfg = chunk and chunk()
+  if type(cfg) ~= "table" then cfg = {} end
+  local o = w.options
+  w.warn = o.Warn ~= 0 and o.Warn / 100 or tonumber(cfg.warn) or DEF_WARN
+  w.crit = o.Crit ~= 0 and o.Crit / 100 or tonumber(cfg.crit) or DEF_CRIT
 end
 
 local function resetAlerts(w)
-  w.alerted, w.pend, w.since = 0, 0, getTime()
+  w.alerted, w.pend, w.since, w.packSeen = 0, 0, getTime(), false
+end
+
+local function create(zone, opts)
+  local w = { zone = zone, options = opts, cells = 0, alerted = 0, pend = 0, since = 0, nextAlert = 0 }
+  loadThresholds(w)
+  return w
 end
 
 local function update(w, opts)
   w.options = opts
   w.cells = 0
+  loadThresholds(w)
   resetAlerts(w)
 end
 
@@ -80,6 +96,8 @@ local function sample(w)
       n = w.cells
     end
     w.n, w.packV, w.cellV = n, v, v / n
+    -- a real pack reads above Crit at connect; USB power alone never does
+    if w.cellV > w.crit then w.packSeen = true end
   elseif not live then
     w.cells = 0 -- re-detect cell count after a pack swap
     resetAlerts(w)
@@ -91,9 +109,9 @@ end
 -- Level only escalates until the link drops, so load sag recovery doesn't re-trigger.
 local function alerts(w)
   local o, cv = w.options, w.cellV
-  if o.Alerts ~= 1 or not w.live or not cv then return end
+  if o.Alerts ~= 1 or not w.live or not cv or not w.packSeen then return end
   local lvl = 0
-  if cv <= o.Crit / 100 then lvl = 2 elseif cv <= o.Warn / 100 then lvl = 1 end
+  if cv <= w.crit then lvl = 2 elseif cv <= w.warn then lvl = 1 end
 
   local now = getTime()
   if lvl ~= w.pend then w.pend, w.since = lvl, now end
@@ -122,7 +140,7 @@ local function refresh(w, event, touchState)
   alerts(w)
   local z, o = w.zone, w.options
   local full = o.LiHV == 1 and 4.35 or 4.20
-  local warn, crit = o.Warn / 100, o.Crit / 100
+  local warn, crit = w.warn, w.crit
 
   -- colour: normal / warn / crit, grey when link is down (last value kept)
   local col = o.Color
