@@ -1,17 +1,20 @@
--- BDVtxBF: reads the VTX setting from Betaflight (MSP_VTX_CONFIG over CRSF/ELRS)
+-- BDVtxBF: reads the VTX setting from Betaflight (MSP_VTX_CONFIG over CRSF/ELRS or FrSky X S.Port)
 -- Shows band+channel, frequency, power index and pit mode as the FC actually has them.
 -- Install: /WIDGETS/BDVtxBF/main.lua on the SD card
 
 local name = "BDVtxBF"
 
 local options = {
-  { "Poll",  VALUE, 2, 1, 10 },   -- seconds between requests
-  { "Color", COLOR, WHITE },
+  { "Poll",   VALUE, 2, 1, 10 },  -- seconds between requests
+  { "Color",  COLOR, WHITE },
+  { "FrSkyX", BOOL, 0 },          -- 1 = MSP over S.Port (FrSky D16 / F.Port) instead of CRSF
 }
 
 local MSP_VTX_CONFIG = 88
 local CRSF_MSP_REQ, CRSF_MSP_RESP = 0x7A, 0x7B
 local ADDR_FC, ADDR_TX = 0xC8, 0xEA
+local SPORT_REQ, SPORT_RESP = 0x30, 0x32
+local SPORT_LOCAL_ID, SPORT_REMOTE_ID, FPORT_REMOTE_ID = 0x0D, 0x1B, 0x00
 
 -- default Betaflight vtxtable band order
 local BANDS = {
@@ -33,11 +36,22 @@ local function update(w, opts)
   w.options = opts
 end
 
--- MSPv1 request with no payload, wrapped in a CRSF extended frame
+local function useSport(w)
+  return w.options.FrSkyX == 1
+end
+
+-- MSPv1 request with no payload, wrapped in a CRSF extended frame or a 6-byte S.Port frame
 local function sendReq(w, cmd)
   local status = 0x20 + 0x10 + w.seq           -- version 1 + start flag + seq
   local crc = bit32.bxor(0, cmd)               -- size (0) xor cmd
-  if crossfireTelemetryPush(CRSF_MSP_REQ, { ADDR_FC, ADDR_TX, status, 0, cmd, crc }) then
+  local ok
+  if useSport(w) then
+    -- bytes {status, size, cmd, crc, 0, 0} -> dataId = status + size<<8, value = cmd + crc<<8
+    ok = sportTelemetryPush(SPORT_LOCAL_ID, SPORT_REQ, status, cmd + crc * 256)
+  else
+    ok = crossfireTelemetryPush(CRSF_MSP_REQ, { ADDR_FC, ADDR_TX, status, 0, cmd, crc })
+  end
+  if ok then
     w.seq = (w.seq + 1) % 16
     w.rx = nil
     return true
@@ -54,12 +68,13 @@ local function parse(w, b)
   w.t = getTime()
 end
 
-local function handle(w, d)
-  local status = d[3]
+-- d[s] is the MSP status byte; MSP data follows it
+local function handle(w, d, s)
+  local status = d[s]
   if not status then return end
   local seq = bit32.band(status, 0x0F)
   local version = bit32.rshift(bit32.band(status, 0x60), 5)
-  local i = 4
+  local i = s + 1
 
   if bit32.btest(status, 0x10) then            -- start of a reply
     if bit32.btest(status, 0x80) then w.rx = nil return end  -- FC reported an error
@@ -84,14 +99,32 @@ local function handle(w, d)
   end
 end
 
-local function poll(w)
+local function pollCrsf(w)
   for _ = 1, 10 do
     local cmd, data = crossfireTelemetryPop()
     if cmd == nil then return end
     if cmd == CRSF_MSP_RESP and data[1] == ADDR_TX and data[2] == ADDR_FC then
-      handle(w, data)
+      handle(w, data, 3)
     end
   end
+end
+
+local function pollSport(w)
+  for _ = 1, 10 do
+    local sensor, frame, dataId, value = sportTelemetryPop()
+    if sensor == nil then return end
+    if (sensor == SPORT_REMOTE_ID or sensor == FPORT_REMOTE_ID) and frame == SPORT_RESP then
+      handle(w, {
+        bit32.band(dataId, 0xFF), bit32.band(bit32.rshift(dataId, 8), 0xFF),
+        bit32.band(value, 0xFF), bit32.band(bit32.rshift(value, 8), 0xFF),
+        bit32.band(bit32.rshift(value, 16), 0xFF), bit32.band(bit32.rshift(value, 24), 0xFF),
+      }, 1)
+    end
+  end
+end
+
+local function poll(w)
+  if useSport(w) then pollSport(w) else pollCrsf(w) end
 end
 
 local function fit(txt, maxW, maxH)
@@ -109,7 +142,9 @@ local function refresh(w, event, touchState)
   local live = getRSSI() > 0
   local main, sub = "--", "VTX"
 
-  if not crossfireTelemetryPush then
+  if useSport(w) and not sportTelemetryPush then
+    sub = "no S.Port"
+  elseif not useSport(w) and not crossfireTelemetryPush then
     sub = "no CRSF"
   else
     poll(w)
