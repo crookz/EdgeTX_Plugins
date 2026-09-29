@@ -34,6 +34,7 @@ A compact per-cell battery voltage widget for EdgeTX colour radios, with voice a
 ### Voice and haptic alerts
 - **Warn:** plays `lowbat.wav` and speaks the cell voltage, once.
 - **Crit:** plays `clobat.wav`, speaks the cell voltage and vibrates. While armed it repeats every 10 seconds. While disarmed it plays once.
+- **Below Crit:** each time the cell voltage drops into a lower 0.1V band (e.g. 3.2x → 3.1x → 3.0x), the new voltage is spoken once. This works armed or disarmed and restarts the 10-second repeat timer, so the callouts don't overlap.
 - The voltage must stay below a threshold for 2 seconds before an alert fires, which filters out momentary sag.
 - The alert level only goes up until the link drops. Once you've heard a warning, it won't replay as voltage recovers after landing.
 - **No false alerts on USB power:** alerts are enabled only after a reading above the armed Crit level has been seen since the link came up. A flight controller on USB with no pack never reaches that, so it stays silent. It still displays whatever it reads.

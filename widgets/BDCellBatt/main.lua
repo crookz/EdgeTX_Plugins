@@ -60,6 +60,7 @@ end
 
 local function resetAlerts(w)
   w.alerted, w.pend, w.since, w.packSeen = 0, 0, getTime(), false
+  w.band, w.bandSince = nil, nil
 end
 
 local function create(zone, opts)
@@ -131,28 +132,39 @@ local function sample(w)
 end
 
 -- Voice alerts: once when dropping to Warn, at Crit repeating while armed (once when disarmed).
--- Level only escalates until the link drops, so load sag recovery doesn't re-trigger.
+-- After Crit, the voltage is also spoken each time it drops into a lower 0.1V band.
+-- Level and band only go down until the link drops, so load sag recovery doesn't re-trigger.
 local function alerts(w)
   local o, cv = w.options, w.cellV
   if o.Alerts ~= 1 or not w.live or not cv or not w.packSeen then return end
   local warn, crit = limits(w)
   local lvl = 0
   if cv <= crit then lvl = 2 elseif cv <= warn then lvl = 1 end
+  local cv100 = math.floor(cv * 100 + 0.5)
+  local band = math.floor(cv100 / 10) -- 0.1V band, e.g. 3.27V -> 32
 
   local now = getTime()
   if lvl ~= w.pend then w.pend, w.since = lvl, now end
-  if lvl == 0 or now - w.since < ALERT_DELAY then return end
+  -- time spent below the last called-out band (restarts whenever it isn't)
+  if not (w.band and band < w.band) then w.bandSince = now end
 
-  if lvl > w.alerted or (lvl == 2 and w.armed and now >= w.nextAlert) then
+  if lvl > 0 and now - w.since >= ALERT_DELAY and
+     (lvl > w.alerted or (lvl == 2 and w.armed and now >= w.nextAlert)) then
     if lvl == 2 then
       playFile("clobat.wav")
       playHaptic(15, 0)
       w.nextAlert = now + CRIT_REPEAT
+      w.band, w.bandSince = math.min(w.band or band, band), now
     else
       playFile("lowbat.wav")
     end
-    playNumber(math.floor(cv * 100 + 0.5), UNIT_VOLTS, PREC2)
+    playNumber(cv100, UNIT_VOLTS, PREC2)
     w.alerted = math.max(w.alerted, lvl)
+  elseif w.band and now - w.bandSince >= ALERT_DELAY then
+    -- stayed in a lower band for 2s: speak the new voltage
+    playNumber(cv100, UNIT_VOLTS, PREC2)
+    w.band, w.bandSince = band, now
+    w.nextAlert = now + CRIT_REPEAT
   end
 end
 
