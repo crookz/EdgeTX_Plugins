@@ -21,9 +21,11 @@ local PAD = 3
 local ALERT_DELAY = 200   -- must stay below a threshold 2s before alerting (10ms ticks)
 local CRIT_REPEAT = 1000  -- repeat the critical alert every 10s
 local CONFIG = "/WIDGETS/BDCellBatt/BDConfig.lua"
-local DEF_WARN, DEF_CRIT = 3.50, 3.30
+local DEF_WARN, DEF_CRIT = 3.50, 3.30          -- armed: under load, with sag
+local DEF_REST_WARN, DEF_REST_CRIT = 3.70, 3.50 -- disarmed: at rest
 
 -- Thresholds in volts per cell: a non-zero widget option wins, else BDConfig, else defaults.
+-- The options only override the armed thresholds; resting ones come from BDConfig.
 -- BDConfig is shared by all models; it is read when a model loads or its options change.
 local function loadThresholds(w)
   local chunk = loadScript(CONFIG)
@@ -32,6 +34,28 @@ local function loadThresholds(w)
   local o = w.options
   w.warn = o.Warn ~= 0 and o.Warn / 100 or tonumber(cfg.warn) or DEF_WARN
   w.crit = o.Crit ~= 0 and o.Crit / 100 or tonumber(cfg.crit) or DEF_CRIT
+  w.restWarn = tonumber(cfg.restWarn) or DEF_REST_WARN
+  w.restCrit = tonumber(cfg.restCrit) or DEF_REST_CRIT
+end
+
+-- Arm state from FC telemetry. CRSF: Betaflight's FM text ends in "*" when disarmed.
+-- FrSky: Tmp1 ones digit is flags 1 = ready, 2 = arming prevented, 4 = armed.
+-- Neither present: assume armed, so the lower under-load thresholds apply.
+local function isArmed()
+  local fm = getValue("FM")
+  if type(fm) == "string" and fm ~= "" then return fm:sub(-1) ~= "*" end
+  local t1 = getValue("Tmp1")
+  if type(t1) == "number" then
+    local d = math.floor(t1) % 10
+    if d >= 1 and d <= 7 then return d >= 4 end
+  end
+  return true
+end
+
+-- warn, crit for the current arm state
+local function limits(w)
+  if w.armed == false then return w.restWarn, w.restCrit end
+  return w.warn, w.crit
 end
 
 local function resetAlerts(w)
@@ -96,7 +120,8 @@ local function sample(w)
       n = w.cells
     end
     w.n, w.packV, w.cellV = n, v, v / n
-    -- a real pack reads above Crit at connect; USB power alone never does
+    w.armed = isArmed()
+    -- a real pack reads above (armed) Crit at connect; USB power alone never does
     if w.cellV > w.crit then w.packSeen = true end
   elseif not live then
     w.cells = 0 -- re-detect cell count after a pack swap
@@ -105,19 +130,20 @@ local function sample(w)
   w.live = live
 end
 
--- Voice alerts: once when dropping to Warn, repeating while at Crit.
+-- Voice alerts: once when dropping to Warn, at Crit repeating while armed (once when disarmed).
 -- Level only escalates until the link drops, so load sag recovery doesn't re-trigger.
 local function alerts(w)
   local o, cv = w.options, w.cellV
   if o.Alerts ~= 1 or not w.live or not cv or not w.packSeen then return end
+  local warn, crit = limits(w)
   local lvl = 0
-  if cv <= w.crit then lvl = 2 elseif cv <= w.warn then lvl = 1 end
+  if cv <= crit then lvl = 2 elseif cv <= warn then lvl = 1 end
 
   local now = getTime()
   if lvl ~= w.pend then w.pend, w.since = lvl, now end
   if lvl == 0 or now - w.since < ALERT_DELAY then return end
 
-  if lvl > w.alerted or (lvl == 2 and now >= w.nextAlert) then
+  if lvl > w.alerted or (lvl == 2 and w.armed and now >= w.nextAlert) then
     if lvl == 2 then
       playFile("clobat.wav")
       playHaptic(15, 0)
@@ -140,7 +166,7 @@ local function refresh(w, event, touchState)
   alerts(w)
   local z, o = w.zone, w.options
   local full = o.LiHV == 1 and 4.35 or 4.20
-  local warn, crit = w.warn, w.crit
+  local warn, crit = limits(w)
 
   -- colour: normal / warn / crit, grey when link is down (last value kept)
   local col = o.Color
