@@ -3,8 +3,9 @@
 -- widget, edits them, then saves them back to that widget's BDConfig.lua.
 
 local APP_TITLE = "BDConfigTool"
+-- Bump MINOR for routine edits; bump MAJOR and reset MINOR for a major overhaul.
 local APP_VERSION_MAJOR = 1
-local APP_VERSION_MINOR = 16
+local APP_VERSION_MINOR = 18
 local APP_VERSION = tostring(APP_VERSION_MAJOR) .. "." .. tostring(APP_VERSION_MINOR)
 local WIDGET_ROOT = "/WIDGETS"
 local widgetNames = { "BDCellBatt", "BDELRSTelem", "BDSwitchPRO", "BDVTXBF" }
@@ -19,6 +20,7 @@ local configSource = nil
 local statusMessage = ""
 local readTextFile
 
+-- Load the selected widget's config table and prepare its editable numeric rows.
 local function loadWidgetFields()
   local widget = widgetNames[selectedWidget]
   local path = WIDGET_ROOT .. "/" .. widget .. "/BDConfig.lua"
@@ -78,6 +80,7 @@ local function loadWidgetFields()
   end
 end
 
+-- Read a complete file using EdgeTX's explicit-file-handle I/O API.
 readTextFile = function(path)
   local file, openErr = io.open(path, "r")
   if not file then
@@ -88,6 +91,7 @@ readTextFile = function(path)
   local readOk = true
   local readErr
   while true do
+    -- EdgeTX's io library takes the file handle as an argument; handles have no methods.
     local ok, data = pcall(io.read, file, 128)
     if not ok or type(data) ~= "string" then
       readOk = false
@@ -108,11 +112,13 @@ readTextFile = function(path)
   return table.concat(chunks)
 end
 
+-- Replace configured numeric values in-place while preserving other source text.
 local function updateNumericValues(source, values)
   local output = {}
   local found = {}
   local position = 1
 
+  -- Replace only numeric literals so config comments, spacing, and key order survive saves.
   while position <= #source do
     local newline = string.find(source, "\n", position, true)
     local lineEnd = newline and newline - 1 or #source
@@ -165,6 +171,7 @@ local function updateNumericValues(source, values)
   return table.concat(output)
 end
 
+-- Write text through EdgeTX's explicit-file-handle I/O API and report failures.
 local function writeTextFile(path, text)
   local file, openErr = io.open(path, "w")
   if not file then
@@ -180,6 +187,7 @@ local function writeTextFile(path, text)
   return true
 end
 
+-- Save edited values after verifying a backup, then verify or restore the file.
 local function saveWidgetFields()
   local widget = widgetNames[selectedWidget]
   local path = WIDGET_ROOT .. "/" .. widget .. "/BDConfig.lua"
@@ -206,6 +214,8 @@ local function saveWidgetFields()
   if not contents then
     return false, updateErr or "Could not update config"
   end
+
+  -- Preserve the original and verify its backup before opening the config for replacement.
   local original, readErr = readTextFile(path)
   if not original then
     return false, "Cannot back up config: " .. tostring(readErr)
@@ -225,6 +235,7 @@ local function saveWidgetFields()
   local writeOk, writeErr = writeTextFile(path, contents)
   local saved = writeOk and readTextFile(path) or nil
   if not writeOk or saved ~= contents then
+    -- A failed or partial write must not leave the widget without its prior config.
     local restoreOk = writeTextFile(path, original)
     local restored = restoreOk and readTextFile(path) or nil
     if restoreOk and restored == original then
@@ -236,6 +247,7 @@ local function saveWidgetFields()
   return true
 end
 
+-- Keep a menu selection within the valid item range.
 local function clampIndex(index, maxIndex)
   if index < 1 then
     return 1
@@ -246,6 +258,7 @@ local function clampIndex(index, maxIndex)
   return index
 end
 
+-- Apply one adjustment step to the selected numeric config value.
 local function adjustField(delta)
   local row = fieldData[selectedField]
   if not row or row.name == "status" then
@@ -258,6 +271,7 @@ local function adjustField(delta)
   end
 end
 
+-- Draw the widget-selection page and its navigation hints.
 local function renderWidgets()
   lcd.clear()
   lcd.drawText(10, 2, APP_TITLE .. " v" .. APP_VERSION, MIDSIZE)
@@ -274,6 +288,7 @@ local function renderWidgets()
   lcd.refresh()
 end
 
+-- Draw the selected widget's values, scrolling the selection into view.
 local function renderFieldList()
   local firstField = math.max(1, selectedField - MAX_VISIBLE_FIELDS + 1)
   local lastField = math.min(#fieldData, firstField + MAX_VISIBLE_FIELDS - 1)
@@ -302,6 +317,7 @@ local function renderFieldList()
   lcd.refresh()
 end
 
+-- Draw the adjustment page for the currently selected value.
 local function renderEdit()
   local row = fieldData[selectedField]
   if not row then
@@ -319,6 +335,7 @@ local function renderEdit()
   lcd.refresh()
 end
 
+-- Initialize menu state when EdgeTX starts the tool.
 local function init_func()
   selectedWidget = 1
   selectedField = 1
@@ -326,6 +343,7 @@ local function init_func()
   loadWidgetFields()
 end
 
+-- Handle EdgeTX key events and render the active menu page.
 local function run_func(event)
   if event == nil then
     return 0
