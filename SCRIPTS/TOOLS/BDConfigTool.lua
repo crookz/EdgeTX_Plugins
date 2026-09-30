@@ -3,7 +3,9 @@
 -- widget, edits them, then saves them back to that widget's BDConfig.lua.
 
 local APP_TITLE = "BDConfigTool"
-local APP_VERSION = 7
+local APP_VERSION_MAJOR = 1
+local APP_VERSION_MINOR = 16
+local APP_VERSION = tostring(APP_VERSION_MAJOR) .. "." .. tostring(APP_VERSION_MINOR)
 local WIDGET_ROOT = "/WIDGETS"
 local widgetNames = { "BDCellBatt", "BDELRSTelem", "BDSwitchPRO", "BDVTXBF" }
 local MAX_VISIBLE_FIELDS = 8
@@ -13,7 +15,9 @@ local selectedField = 1
 local page = "widgets"
 local fieldData = {}
 local configData = {}
+local configSource = nil
 local statusMessage = ""
+local readTextFile
 
 local function loadWidgetFields()
   local widget = widgetNames[selectedWidget]
@@ -21,30 +25,37 @@ local function loadWidgetFields()
 
   fieldData = {}
   configData = {}
+  configSource = nil
   statusMessage = ""
 
-  local input = io.open(path, "r")
-  if not input then
+  local source, sourceErr = readTextFile(path)
+  if not source then
+    fieldData = { { name = "status", value = "Cannot read BDConfig.lua" } }
+    statusMessage = tostring(sourceErr)
+    return
+  end
+  configSource = source
+
+  local chunk = loadScript(path)
+  if type(chunk) ~= "function" then
     fieldData = { { name = "status", value = "No BDConfig.lua" } }
     return
   end
 
-  local source = input:read("*a")
-  input:close()
-  if not source or source == "" then
-    fieldData = { { name = "status", value = "Invalid config" } }
-    return
-  end
-
-  local chunk = loadstring(source)
-  if not chunk then
-    fieldData = { { name = "status", value = "Invalid config" } }
-    return
-  end
-
   local ok, cfg = pcall(chunk)
-  if not ok or type(cfg) ~= "table" then
-    fieldData = { { name = "status", value = "Invalid config" } }
+  if not ok then
+    fieldData = { { name = "status", value = "Config load error" } }
+    statusMessage = tostring(cfg)
+    return
+  end
+
+  if type(cfg) ~= "table" then
+    if cfg == nil then
+      fieldData = { { name = "status", value = "Empty config (no table returned)" } }
+      statusMessage = "Restore config: deploy BDCellBatt"
+    else
+      fieldData = { { name = "status", value = "Config returned " .. type(cfg) } }
+    end
     return
   end
 
@@ -67,6 +78,108 @@ local function loadWidgetFields()
   end
 end
 
+readTextFile = function(path)
+  local file, openErr = io.open(path, "r")
+  if not file then
+    return nil, openErr or "open failed"
+  end
+
+  local chunks = {}
+  local readOk = true
+  local readErr
+  while true do
+    local ok, data = pcall(io.read, file, 128)
+    if not ok or type(data) ~= "string" then
+      readOk = false
+      readErr = data or "read failed"
+      break
+    end
+    if #data == 0 then
+      break
+    end
+    chunks[#chunks + 1] = data
+  end
+
+  local closeOk = pcall(io.close, file)
+  if not readOk or not closeOk then
+    return nil, tostring(readErr or "close failed")
+  end
+
+  return table.concat(chunks)
+end
+
+local function updateNumericValues(source, values)
+  local output = {}
+  local found = {}
+  local position = 1
+
+  while position <= #source do
+    local newline = string.find(source, "\n", position, true)
+    local lineEnd = newline and newline - 1 or #source
+    local lineEnding = newline and "\n" or ""
+    if newline and lineEnd >= position and string.sub(source, lineEnd, lineEnd) == "\r" then
+      lineEnd = lineEnd - 1
+      lineEnding = "\r\n"
+    end
+
+    local line = string.sub(source, position, lineEnd)
+    local prefix, remainder = string.match(line, "^(.-=)(.*)$")
+    if prefix then
+      local keyText = string.match(string.sub(prefix, 1, -2), "^%s*(.-)%s*$")
+      local key
+      if values[keyText] ~= nil then
+        key = keyText
+      else
+        for candidate in pairs(values) do
+          if keyText == "[" .. string.format("%q", candidate) .. "]" then
+            key = candidate
+            break
+          end
+        end
+      end
+
+      if key then
+        local spacing = string.match(remainder, "^(%s*)") or ""
+        local numberText, suffix = string.match(string.sub(remainder, #spacing + 1), "^([+-]?[%d%.]+[eE]?[+-]?%d*)(.*)$")
+        if not numberText or not tonumber(numberText) then
+          return nil, "Cannot parse value for " .. key
+        end
+        line = prefix .. spacing .. string.format("%.6f", values[key]) .. suffix
+        found[key] = true
+      end
+    end
+
+    output[#output + 1] = line .. lineEnding
+    if not newline then
+      break
+    end
+    position = newline + 1
+  end
+
+  for key in pairs(values) do
+    if not found[key] then
+      return nil, "Config entry not found: " .. key
+    end
+  end
+
+  return table.concat(output)
+end
+
+local function writeTextFile(path, text)
+  local file, openErr = io.open(path, "w")
+  if not file then
+    return false, openErr or "open failed"
+  end
+
+  local okWrite, writeResult, writeErr = pcall(io.write, file, text)
+  local okClose = pcall(io.close, file)
+  if not okWrite or writeResult == nil or not okClose then
+    return false, tostring(writeErr or writeResult or "write failed")
+  end
+
+  return true
+end
+
 local function saveWidgetFields()
   local widget = widgetNames[selectedWidget]
   local path = WIDGET_ROOT .. "/" .. widget .. "/BDConfig.lua"
@@ -78,51 +191,46 @@ local function saveWidgetFields()
     end
   end
 
-  local keys = {}
+  local editValues = {}
   for key, value in pairs(configData) do
     if type(key) ~= "string" or
        (type(value) ~= "number" and type(value) ~= "string" and type(value) ~= "boolean") then
       return false, "Unsupported config value"
     end
-    keys[#keys + 1] = key
-  end
-  table.sort(keys)
-
-  local lines = { "-- auto-saved by BDConfigTool\nreturn {\n" }
-  for i = 1, #keys do
-    local key = keys[i]
-    local value = configData[key]
-    local valueText
     if type(value) == "number" then
-      valueText = string.format("%.6f", value)
-    elseif type(value) == "string" then
-      valueText = string.format("%q", value)
-    else
-      valueText = tostring(value)
+      editValues[key] = value
     end
-    lines[#lines + 1] = "  [" .. string.format("%q", key) .. "] = " .. valueText .. ",\n"
-  end
-  lines[#lines + 1] = "}\n"
-
-  local file, openErr = io.open(path, "w")
-  if not file then
-    return false, openErr or "open failed"
   end
 
-  local previousOutput = io.output()
-  local okWrite, writeErr = pcall(function()
-    io.output(file)
-    io.write(table.concat(lines))
-  end)
-  pcall(function()
-    io.output(previousOutput)
-  end)
-  local okClose, closeErr = pcall(function()
-    io.close(file)
-  end)
+  local contents, updateErr = updateNumericValues(configSource or "", editValues)
+  if not contents then
+    return false, updateErr or "Could not update config"
+  end
+  local original, readErr = readTextFile(path)
+  if not original then
+    return false, "Cannot back up config: " .. tostring(readErr)
+  end
 
-  if not okWrite or not okClose then
-    return false, writeErr or closeErr or "write failed"
+  local backupPath = path .. ".bak"
+  local backupOk, backupErr = writeTextFile(backupPath, original)
+  if not backupOk then
+    return false, "Backup failed: " .. tostring(backupErr)
+  end
+
+  local backupCheck, backupReadErr = readTextFile(backupPath)
+  if backupCheck ~= original then
+    return false, "Backup verify failed: " .. tostring(backupReadErr or "data mismatch")
+  end
+
+  local writeOk, writeErr = writeTextFile(path, contents)
+  local saved = writeOk and readTextFile(path) or nil
+  if not writeOk or saved ~= contents then
+    local restoreOk = writeTextFile(path, original)
+    local restored = restoreOk and readTextFile(path) or nil
+    if restoreOk and restored == original then
+      return false, "Save failed; original restored"
+    end
+    return false, "Save/restore failed; .bak preserved"
   end
 
   return true
