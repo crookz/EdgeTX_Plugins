@@ -5,7 +5,7 @@
 local APP_TITLE = "BDConfigTool"
 -- Bump MINOR for routine edits; bump MAJOR and reset MINOR for a major overhaul.
 local APP_VERSION_MAJOR = 1
-local APP_VERSION_MINOR = 18
+local APP_VERSION_MINOR = 19
 local APP_VERSION = tostring(APP_VERSION_MAJOR) .. "." .. tostring(APP_VERSION_MINOR)
 local WIDGET_ROOT = "/WIDGETS"
 local widgetNames = { "BDCellBatt", "BDELRSTelem", "BDSwitchPRO", "BDVTXBF" }
@@ -38,7 +38,7 @@ local function loadWidgetFields()
   end
   configSource = source
 
-  local chunk = loadScript(path)
+  local chunk = loadScript(path, "tc")
   if type(chunk) ~= "function" then
     fieldData = { { name = "status", value = "No BDConfig.lua" } }
     return

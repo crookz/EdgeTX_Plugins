@@ -43,7 +43,7 @@ end
 -- Neither present: assume armed, so the lower under-load thresholds apply.
 local function isArmed()
   local fm = getValue("FM")
-  if type(fm) == "string" and fm ~= "" then return fm:sub(-1) ~= "*" end
+  if type(fm) == "string" and fm ~= "" then return string.sub(fm, -1) ~= "*" end
   local t1 = getValue("Tmp1")
   if type(t1) == "number" then
     local d = math.floor(t1) % 10
